@@ -1,82 +1,115 @@
 package com.eric.Wallpaperadb
+
+import android.Manifest
 import android.app.WallpaperManager
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import java.io.File
 import java.io.IOException
 import kotlin.math.max
 
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        private const val STORAGE_PERMISSION_CODE = 101
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Ontvang bestandspad van intent extras
-        val filePath = intent.getStringExtra("filePath")
-
-        // Stel de wallpaper in
-        setWallpaper(filePath)
-
-        // Sluit de app direct na het instellen van de wallpaper
-        finish()
+        if (checkStoragePermission()) {
+            processWallpaper()
+        } else {
+            requestStoragePermission()
+        }
     }
 
-    private fun setWallpaper(filePath: String?) {
-        // WallpaperManager verkrijgen
-        val wallpaperManager = WallpaperManager.getInstance(applicationContext)
-        val originalBitmap: Bitmap? = loadBitmapFromPath(filePath) ?: BitmapFactory.decodeResource(
-            resources,
-            R.drawable.wallpaper_image
-        )
+    private fun checkStoragePermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        }
+    }
 
-        if (originalBitmap == null) {
-            showToast("Fout bij het laden van de afbeelding.")
+    private fun requestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.READ_MEDIA_IMAGES), STORAGE_PERMISSION_CODE)
+        } else {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE), STORAGE_PERMISSION_CODE)
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == STORAGE_PERMISSION_CODE) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                processWallpaper()
+            } else {
+                showToast("Toegang tot opslag is geweigerd. Kan geen wallpaper instellen.")
+                finish()
+            }
+        }
+    }
+
+    private fun processWallpaper() {
+        val filePath = intent.getStringExtra("filePath")
+
+        if (filePath.isNullOrEmpty()) {
+            showToast("Fout: Geen geldig bestandspad opgegeven.")
+            finish()
             return
         }
 
-        // Schermresolutie verkrijgen
+        setWallpaper(filePath)
+        finish()
+    }
+
+    private fun setWallpaper(filePath: String) {
+        val wallpaperManager = WallpaperManager.getInstance(applicationContext)
+        val originalBitmap = loadBitmapFromPath(filePath)
+
+        if (originalBitmap == null) {
+            showToast("Fout bij het laden van de afbeelding. Controleer het bestandspad.")
+            return
+        }
+
         val displayMetrics = resources.displayMetrics
         val screenWidth = displayMetrics.widthPixels
         val screenHeight = displayMetrics.heightPixels
 
-        // Genereer een geschaalde en gecentreerde bitmap
         val adjustedBitmap = createScaledAndCenteredBitmap(originalBitmap, screenWidth, screenHeight)
 
         try {
-            // Stel de wallpaper in
             wallpaperManager.setBitmap(adjustedBitmap)
-            showToast("Wallpaper is ingesteld!")
+            showToast("Wallpaper succesvol ingesteld!")
         } catch (e: IOException) {
             e.printStackTrace()
             showToast("Fout bij het instellen van de wallpaper.")
         }
     }
 
-    private fun loadBitmapFromPath(filePath: String?): Bitmap? {
-        if (filePath.isNullOrEmpty()) {
-            android.util.Log.e("MainActivity", "Geen bestandspad opgegeven")
-            return null
-        }
-
+    private fun loadBitmapFromPath(filePath: String): Bitmap? {
         val file = File(filePath)
         if (!file.exists() || !file.canRead()) {
             android.util.Log.e("MainActivity", "Bestand bestaat niet of is niet leesbaar: $filePath")
             return null
         }
-
         return BitmapFactory.decodeFile(file.absolutePath)
     }
 
     private fun createScaledAndCenteredBitmap(originalBitmap: Bitmap, screenWidth: Int, screenHeight: Int): Bitmap {
-        // Maak een bitmap met de grootte van het scherm
         val resultBitmap = Bitmap.createBitmap(screenWidth, screenHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(resultBitmap)
 
-        // Schaal de originele bitmap zodat deze in het scherm past
         val scale = max(
             screenWidth.toFloat() / originalBitmap.width,
             screenHeight.toFloat() / originalBitmap.height
@@ -87,11 +120,9 @@ class MainActivity : AppCompatActivity() {
 
         val scaledBitmap = Bitmap.createScaledBitmap(originalBitmap, scaledWidth, scaledHeight, true)
 
-        // Bereken de offsets om de bitmap te centreren
         val offsetX = (screenWidth - scaledWidth) / 2f
         val offsetY = (screenHeight - scaledHeight) / 2f
 
-        // Teken de geschaalde bitmap gecentreerd op het canvas
         canvas.drawBitmap(scaledBitmap, offsetX, offsetY, null)
 
         return resultBitmap
